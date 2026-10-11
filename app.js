@@ -83,6 +83,7 @@
   // --- Application State ---
   const state = {
     matrixCount: 2, // 2 or 3
+    opMode: 'auto', // 'auto', 'AB', 'BC', 'AC', 'ABC'
     rowsA: 2,
     colsA: 3,
     rowsB: 3,
@@ -125,12 +126,66 @@
     return Math.floor(Math.random() * (max - min + 1)) + min;
   }
 
-  function canMultiply() {
+  function isMatrixFilled(mat) {
+    if (!mat || !mat.length) return false;
+    return mat.some(row => Array.isArray(row) && row.some(cell => {
+      return cell !== '' && cell !== null && cell !== undefined && !(typeof cell === 'number' && isNaN(cell));
+    }));
+  }
+
+  function getEffectiveOperation() {
     if (state.matrixCount === 2) {
+      return 'AB';
+    }
+
+    if (state.opMode && state.opMode !== 'auto') {
+      return state.opMode;
+    }
+
+    // Auto-detect based on filled matrices
+    const filledA = isMatrixFilled(state.matrixA);
+    const filledB = isMatrixFilled(state.matrixB);
+    const filledC = isMatrixFilled(state.matrixCInput);
+
+    if (filledA && filledB && filledC) {
+      return 'ABC';
+    }
+    if (!filledA && filledB && filledC) {
+      return 'BC';
+    }
+    if (filledA && !filledB && filledC) {
+      return 'AC';
+    }
+    if (filledA && filledB && !filledC) {
+      return 'AB';
+    }
+
+    // Single-matrix filled fallbacks
+    if (!filledA && filledB && !filledC) {
+      return 'BC';
+    }
+    if (!filledA && !filledB && filledC) {
+      return 'BC';
+    }
+    if (filledA && !filledB && !filledC) {
+      return 'AB';
+    }
+
+    return 'ABC';
+  }
+
+  function canMultiply() {
+    const op = getEffectiveOperation();
+    if (op === 'AB') {
       return state.colsA === state.rowsB;
-    } else {
+    } else if (op === 'BC') {
+      return state.colsB === state.rowsC;
+    } else if (op === 'AC') {
+      return state.colsA === state.rowsC;
+    } else if (op === 'ABC') {
       return (state.colsA === state.rowsB) && (state.colsB === state.rowsC);
     }
+    return false;
   }
 
   function computeResultMatrix() {
@@ -141,7 +196,9 @@
       return;
     }
 
-    if (state.matrixCount === 2) {
+    const op = getEffectiveOperation();
+
+    if (op === 'AB') {
       const m = state.rowsA;
       const kDim = state.colsA;
       const n = state.colsB;
@@ -161,8 +218,54 @@
         C.push(row);
       }
       state.matrixC = C;
+      state.intermediateAB = [];
+      state.matrixR = [];
+    } else if (op === 'BC') {
+      const m = state.rowsB;
+      const kDim = state.colsB;
+      const n = state.colsC;
+      const C = [];
+
+      for (let i = 0; i < m; i++) {
+        const row = [];
+        for (let j = 0; j < n; j++) {
+          let sum = 0;
+          for (let k = 0; k < kDim; k++) {
+            const valB = Number(state.matrixB[i]?.[k]) || 0;
+            const valC = Number(state.matrixCInput[k]?.[j]) || 0;
+            sum += valB * valC;
+          }
+          row.push(sum);
+        }
+        C.push(row);
+      }
+      state.matrixC = C;
+      state.intermediateAB = [];
+      state.matrixR = [];
+    } else if (op === 'AC') {
+      const m = state.rowsA;
+      const kDim = state.colsA;
+      const n = state.colsC;
+      const C = [];
+
+      for (let i = 0; i < m; i++) {
+        const row = [];
+        for (let j = 0; j < n; j++) {
+          let sum = 0;
+          for (let k = 0; k < kDim; k++) {
+            const valA = Number(state.matrixA[i]?.[k]) || 0;
+            const valC = Number(state.matrixCInput[k]?.[j]) || 0;
+            sum += valA * valC;
+          }
+          row.push(sum);
+        }
+        C.push(row);
+      }
+      state.matrixC = C;
+      state.intermediateAB = [];
+      state.matrixR = [];
     } else {
-      // 3-matrix mode:
+      // 3-matrix ABC mode:
       // Stage 1: AB = A (m x k) * B (k x l) -> shape (m x l)
       const m = state.rowsA;
       const kDim = state.colsA;
@@ -215,8 +318,9 @@
     }
 
     const steps = [];
+    const op = getEffectiveOperation();
 
-    if (state.matrixCount === 2) {
+    if (op === 'AB') {
       const m = state.rowsA;
       const kDim = state.colsA;
       const n = state.colsB;
@@ -243,6 +347,7 @@
 
             steps.push({
               stage: 1,
+              op: 'AB',
               type: 'subterm',
               i,
               j,
@@ -254,13 +359,101 @@
               isCellEnd: k === kDim - 1,
               cellTerms: [...cellTerms],
               cellTotalTerms: kDim,
-              targetLabel: `C[${i + 1}, ${j + 1}]`
+              targetLabel: `(A×B)[${i + 1}, ${j + 1}]`
+            });
+          }
+        }
+      }
+    } else if (op === 'BC') {
+      const m = state.rowsB;
+      const kDim = state.colsB;
+      const n = state.colsC;
+
+      for (let i = 0; i < m; i++) {
+        for (let j = 0; j < n; j++) {
+          let runningSum = 0;
+          const cellTerms = [];
+
+          for (let k = 0; k < kDim; k++) {
+            const valB = Number(state.matrixB[i]?.[k]) || 0;
+            const valC = Number(state.matrixCInput[k]?.[j]) || 0;
+            const prod = valB * valC;
+            runningSum += prod;
+
+            const term = {
+              k,
+              valA: valB,
+              valB: valC,
+              prod,
+              runningSum
+            };
+            cellTerms.push(term);
+
+            steps.push({
+              stage: 1,
+              op: 'BC',
+              type: 'subterm',
+              i,
+              j,
+              k,
+              valA: valB,
+              valB: valC,
+              prod,
+              runningSum,
+              isCellEnd: k === kDim - 1,
+              cellTerms: [...cellTerms],
+              cellTotalTerms: kDim,
+              targetLabel: `(B×C)[${i + 1}, ${j + 1}]`
+            });
+          }
+        }
+      }
+    } else if (op === 'AC') {
+      const m = state.rowsA;
+      const kDim = state.colsA;
+      const n = state.colsC;
+
+      for (let i = 0; i < m; i++) {
+        for (let j = 0; j < n; j++) {
+          let runningSum = 0;
+          const cellTerms = [];
+
+          for (let k = 0; k < kDim; k++) {
+            const valA = Number(state.matrixA[i]?.[k]) || 0;
+            const valC = Number(state.matrixCInput[k]?.[j]) || 0;
+            const prod = valA * valC;
+            runningSum += prod;
+
+            const term = {
+              k,
+              valA,
+              valB: valC,
+              prod,
+              runningSum
+            };
+            cellTerms.push(term);
+
+            steps.push({
+              stage: 1,
+              op: 'AC',
+              type: 'subterm',
+              i,
+              j,
+              k,
+              valA,
+              valB: valC,
+              prod,
+              runningSum,
+              isCellEnd: k === kDim - 1,
+              cellTerms: [...cellTerms],
+              cellTotalTerms: kDim,
+              targetLabel: `(A×C)[${i + 1}, ${j + 1}]`
             });
           }
         }
       }
     } else {
-      // 3-matrix mode:
+      // 3-matrix ABC mode:
       // Stage 1: A x B -> Intermediate AB
       const m = state.rowsA;
       const kDim = state.colsA;
@@ -281,6 +474,7 @@
 
             steps.push({
               stage: 1,
+              op: 'ABC',
               type: 'subterm',
               i,
               j: p, // col in intermediate
@@ -313,6 +507,7 @@
 
             steps.push({
               stage: 2,
+              op: 'ABC',
               type: 'subterm',
               i,
               j,
@@ -340,7 +535,26 @@
     mode2MatricesBtn: document.getElementById('mode2MatricesBtn'),
     mode3MatricesBtn: document.getElementById('mode3MatricesBtn'),
     swapABTopBtn: document.getElementById('swapABTopBtn'),
+    swapBCTopBtn: document.getElementById('swapBCTopBtn'),
+    swapACTopBtn: document.getElementById('swapACTopBtn'),
     swapStageBtn: document.getElementById('swapStageBtn'),
+    swapStageBtnBC: document.getElementById('swapStageBtnBC'),
+    opTimesAB: document.getElementById('opTimesAB'),
+
+    // Operation Mode Elements
+    opModeBar: document.getElementById('opModeBar'),
+    activeOpCurrentBadge: document.getElementById('activeOpCurrentBadge'),
+    activeOpReasonBadge: document.getElementById('activeOpReasonBadge'),
+    opModeAutoBtn: document.getElementById('opModeAutoBtn'),
+    opModeABBtn: document.getElementById('opModeABBtn'),
+    opModeBCBtn: document.getElementById('opModeBCBtn'),
+    opModeACBtn: document.getElementById('opModeACBtn'),
+    opModeABCBtn: document.getElementById('opModeABCBtn'),
+
+    // Card status badges
+    statusBadgeA: document.getElementById('statusBadgeA'),
+    statusBadgeB: document.getElementById('statusBadgeB'),
+    statusBadgeC: document.getElementById('statusBadgeC'),
 
     // Inputs Matrix A & B
     rowsA: document.getElementById('rowsA'),
@@ -545,12 +759,99 @@
       el.badgeCInput.textContent = `${state.rowsC} × ${state.colsC}`;
       el.badgeIntermediate.textContent = `${state.rowsA} × ${state.colsB}`;
     }
-    el.innerKVal.textContent = state.colsA;
+
+    const op = getEffectiveOperation();
+
+    // Inner dimension K badge
+    if (op === 'BC') {
+      el.innerKVal.textContent = state.colsB;
+    } else if (op === 'AC') {
+      el.innerKVal.textContent = state.colsA;
+    } else {
+      el.innerKVal.textContent = state.colsA;
+    }
+
+    // Card titles and hints based on active operation
+    if (op === 'AB') {
+      if (el.resCardTitle) el.resCardTitle.textContent = state.matrixCount === 2 ? 'Result Matrix C' : 'Result (A × B)';
+      if (el.resCardHint) el.resCardHint.textContent = 'Computed from A × B • Select to inspect';
+      if (el.resLabelBadge) el.resLabelBadge.textContent = state.matrixCount === 2 ? 'Matrix C' : 'Result (A × B)';
+    } else if (op === 'BC') {
+      if (el.resCardTitle) el.resCardTitle.textContent = 'Result (B × C)';
+      if (el.resCardHint) el.resCardHint.textContent = 'Computed from B × C • Select to inspect';
+      if (el.resLabelBadge) el.resLabelBadge.textContent = 'Result (B × C)';
+    } else if (op === 'AC') {
+      if (el.resCardTitle) el.resCardTitle.textContent = 'Result (A × C)';
+      if (el.resCardHint) el.resCardHint.textContent = 'Computed from A × C • Select to inspect';
+      if (el.resLabelBadge) el.resLabelBadge.textContent = 'Result (A × C)';
+    } else {
+      if (el.resCardTitle) el.resCardTitle.textContent = 'Final Result R';
+      if (el.resCardHint) el.resCardHint.textContent = 'R = (A × B) × C • Select to inspect';
+      if (el.resLabelBadge) el.resLabelBadge.textContent = 'Matrix R';
+    }
+
+    // Intermediate Card visibility
+    if (el.cardIntermediate) {
+      el.cardIntermediate.classList.toggle('hidden', state.matrixCount !== 3 || op !== 'ABC');
+    }
+
+    // Card omitted styling & status badges
+    const omitA = (state.matrixCount === 3 && op === 'BC');
+    const omitB = (state.matrixCount === 3 && op === 'AC');
+    const omitC = (state.matrixCount === 3 && op === 'AB');
+
+    el.cardMatrixA?.classList.toggle('matrix-card-omitted', omitA);
+    if (el.statusBadgeA) {
+      el.statusBadgeA.classList.toggle('hidden', !omitA);
+      el.statusBadgeA.className = 'badge-card-status ' + (omitA ? 'status-omitted' : 'status-active');
+      el.statusBadgeA.textContent = omitA ? 'Empty / Skipped' : 'Active';
+    }
+
+    el.cardMatrixB?.classList.toggle('matrix-card-omitted', omitB);
+    if (el.statusBadgeB) {
+      el.statusBadgeB.classList.toggle('hidden', !omitB);
+      el.statusBadgeB.className = 'badge-card-status ' + (omitB ? 'status-omitted' : 'status-active');
+      el.statusBadgeB.textContent = omitB ? 'Empty / Skipped' : 'Active';
+    }
+
+    el.cardMatrixCInput?.classList.toggle('matrix-card-omitted', omitC);
+    if (el.statusBadgeC) {
+      el.statusBadgeC.classList.toggle('hidden', !omitC);
+      el.statusBadgeC.className = 'badge-card-status ' + (omitC ? 'status-omitted' : 'status-active');
+      el.statusBadgeC.textContent = omitC ? 'Empty / Skipped' : 'Active';
+    }
+
+    el.opTimesAB?.classList.toggle('operator-dimmed', omitA);
+    if (el.opTimesBC) {
+      el.opTimesBC.classList.toggle('hidden', state.matrixCount !== 3);
+      el.opTimesBC.classList.toggle('operator-dimmed', omitC);
+    }
+
+    // Output dimension calculation
+    let outRows = state.rowsA;
+    let outCols = state.colsB;
+    let reason = '';
+
+    if (op === 'BC') {
+      outRows = state.rowsB;
+      outCols = state.colsC;
+      reason = `Columns of B (${state.colsB}) must equal Rows of C (${state.rowsC}).`;
+    } else if (op === 'AC') {
+      outRows = state.rowsA;
+      outCols = state.colsC;
+      reason = `Columns of A (${state.colsA}) must equal Rows of C (${state.rowsC}).`;
+    } else if (op === 'AB') {
+      outRows = state.rowsA;
+      outCols = state.colsB;
+      reason = `Columns of A (${state.colsA}) must equal Rows of B (${state.rowsB}).`;
+    } else {
+      outRows = state.rowsA;
+      outCols = state.colsC;
+      reason = `Cols A (${state.colsA}) must equal Rows B (${state.rowsB}), AND Cols B (${state.colsB}) must equal Rows C (${state.rowsC}).`;
+    }
 
     const valid = canMultiply();
     if (valid) {
-      const outRows = state.rowsA;
-      const outCols = state.matrixCount === 2 ? state.colsB : state.colsC;
       el.resDimText.textContent = `${outRows} × ${outCols}`;
       el.badgeC.textContent = `${outRows} × ${outCols}`;
       el.dimStatusBadge.classList.remove('mismatch');
@@ -566,9 +867,6 @@
       el.dimStatusBadge.classList.add('mismatch');
       el.dimStatusBadge.querySelector('.icon-match').classList.add('hidden');
       el.dimStatusBadge.querySelector('.icon-error').classList.remove('hidden');
-      const reason = state.matrixCount === 2
-        ? `Columns of A (${state.colsA}) must equal Rows of B (${state.rowsB}).`
-        : `Cols A (${state.colsA}) must equal Rows B (${state.rowsB}), AND Cols B (${state.colsB}) must equal Rows C (${state.rowsC}).`;
       el.dimensionAlertText.textContent = `Dimension mismatch: ${reason}`;
       el.dimensionAlert.classList.remove('hidden');
       stopPlaying();
@@ -576,6 +874,28 @@
       el.btnNext.disabled = true;
       el.btnPrev.disabled = true;
     }
+
+    // Update Operation Mode Bar UI
+    if (el.activeOpCurrentBadge) {
+      const opLabels = {
+        'AB': 'A × B',
+        'BC': 'B × C',
+        'AC': 'A × C',
+        'ABC': '(A × B) × C'
+      };
+      el.activeOpCurrentBadge.textContent = opLabels[op] || op;
+    }
+    if (el.activeOpReasonBadge) {
+      el.activeOpReasonBadge.textContent = (state.opMode === 'auto')
+        ? 'Auto-detected from filled matrices'
+        : 'Manually selected';
+    }
+    const currentMode = state.opMode || 'auto';
+    el.opModeAutoBtn?.classList.toggle('active', currentMode === 'auto');
+    el.opModeABBtn?.classList.toggle('active', currentMode === 'AB');
+    el.opModeBCBtn?.classList.toggle('active', currentMode === 'BC');
+    el.opModeACBtn?.classList.toggle('active', currentMode === 'AC');
+    el.opModeABCBtn?.classList.toggle('active', currentMode === 'ABC');
   }
 
   // Helper to dynamically toggle zero, non-zero, and empty styling
@@ -836,8 +1156,19 @@
     el.gridC.innerHTML = '';
     if (!canMultiply()) return;
 
-    const outRows = state.rowsA;
-    const outCols = state.matrixCount === 2 ? state.colsB : state.colsC;
+    const op = getEffectiveOperation();
+    let outRows = state.rowsA;
+    let outCols = state.colsB;
+    if (op === 'BC') {
+      outRows = state.rowsB;
+      outCols = state.colsC;
+    } else if (op === 'AC') {
+      outRows = state.rowsA;
+      outCols = state.colsC;
+    } else if (op === 'ABC') {
+      outRows = state.rowsA;
+      outCols = state.colsC;
+    }
 
     el.gridC.style.gridTemplateRows = `repeat(${outRows}, 52px)`;
     el.gridC.style.gridTemplateColumns = `repeat(${outCols}, 58px)`;
@@ -908,9 +1239,24 @@
   function onMatrixDataChanged() {
     computeResultMatrix();
     generateSteps();
+    syncDimensionUI();
 
-    // Refresh intermediate grid if 3-matrix mode
-    if (state.matrixCount === 3) {
+    const op = getEffectiveOperation();
+    let outRows = state.rowsA;
+    let outCols = state.colsB;
+    if (op === 'BC') {
+      outRows = state.rowsB;
+      outCols = state.colsC;
+    } else if (op === 'AC') {
+      outRows = state.rowsA;
+      outCols = state.colsC;
+    } else if (op === 'ABC') {
+      outRows = state.rowsA;
+      outCols = state.colsC;
+    }
+
+    // Refresh intermediate grid if in 3-matrix ABC mode
+    if (state.matrixCount === 3 && op === 'ABC') {
       for (let r = 0; r < state.rowsA; r++) {
         for (let c = 0; c < state.colsB; c++) {
           const valElem = document.getElementById(`val-Inter-${r}-${c}`);
@@ -922,19 +1268,22 @@
       }
     }
 
-    // Refresh result grid values and zero/nonzero status
-    const outRows = state.rowsA;
-    const outCols = state.matrixCount === 2 ? state.colsB : state.colsC;
-    for (let r = 0; r < outRows; r++) {
-      for (let c = 0; c < outCols; c++) {
-        const valElem = document.getElementById(`val-C-${r}-${c}`);
-        const cellC = document.getElementById(`cell-C-${r}-${c}`);
-        const val = state.matrixC[r]?.[c] ?? 0;
-        if (valElem) {
-          valElem.textContent = val;
-        }
-        if (cellC) {
-          updateCellZeroState(cellC, val);
+    // If grid element count changed due to dynamic operation change, re-render grid
+    if (el.gridC.children.length !== outRows * outCols) {
+      renderGridC();
+    } else {
+      // Refresh result grid values and zero/nonzero status
+      for (let r = 0; r < outRows; r++) {
+        for (let c = 0; c < outCols; c++) {
+          const valElem = document.getElementById(`val-C-${r}-${c}`);
+          const cellC = document.getElementById(`cell-C-${r}-${c}`);
+          const val = state.matrixC[r]?.[c] ?? 0;
+          if (valElem) {
+            valElem.textContent = val;
+          }
+          if (cellC) {
+            updateCellZeroState(cellC, val);
+          }
         }
       }
     }
@@ -987,8 +1336,8 @@
       }
 
       // Restore calculated values in Result grid
-      const outRows = state.rowsA;
-      const outCols = state.matrixCount === 2 ? state.colsB : state.colsC;
+      const outRows = state.matrixC.length;
+      const outCols = state.matrixC[0]?.length || 0;
       for (let r = 0; r < outRows; r++) {
         for (let c = 0; c < outCols; c++) {
           const valElem = document.getElementById(`val-C-${r}-${c}`);
@@ -1002,9 +1351,72 @@
     }
 
     const currentStep = state.steps[state.currentStepIndex];
-    const { stage, i, j, k, valA, valB, prod, runningSum, isCellEnd, cellTerms, cellTotalTerms, targetLabel } = currentStep;
+    const { stage, op, i, j, k, valA, valB, prod, runningSum, isCellEnd, cellTerms, cellTotalTerms, targetLabel } = currentStep;
+    const stepOp = op || (state.matrixCount === 2 ? 'AB' : 'ABC');
 
-    if (state.matrixCount === 2 || stage === 1) {
+    if (stepOp === 'BC') {
+      // Matrix B x Matrix C -> Result C
+      // 1. Highlight Row i in Matrix B
+      for (let colIdx = 0; colIdx < state.colsB; colIdx++) {
+        const cellB = document.getElementById(`cell-B-${i}-${colIdx}`);
+        if (cellB) cellB.classList.add('row-active');
+      }
+
+      // 2. Highlight Column j in Matrix C Input
+      for (let rowIdx = 0; rowIdx < state.rowsC; rowIdx++) {
+        const cellCIn = document.getElementById(`cell-CIn-${rowIdx}-${j}`);
+        if (cellCIn) cellCIn.classList.add('col-active');
+      }
+
+      // 3. Highlight exact multiplying pair B[i][k] and C[k][j]
+      const termCellB = document.getElementById(`cell-B-${i}-${k}`);
+      const termCellCIn = document.getElementById(`cell-CIn-${k}-${j}`);
+      if (termCellB) termCellB.classList.add('term-active');
+      if (termCellCIn) termCellCIn.classList.add('term-active');
+
+      // 4. Highlight target cell
+      const targetCellC = document.getElementById(`cell-C-${i}-${j}`);
+      if (targetCellC) {
+        targetCellC.classList.add('target-active', 'target-computed');
+        const valElem = document.getElementById(`val-C-${i}-${j}`);
+        if (valElem) valElem.textContent = runningSum;
+        updateCellZeroState(targetCellC, runningSum);
+      }
+      el.currentCellName.textContent = `(B×C)[${i + 1}, ${j + 1}]`;
+      el.ruleRow.textContent = `Row ${i + 1} (B)`;
+      el.ruleCol.textContent = `Col ${j + 1} (C)`;
+    } else if (stepOp === 'AC') {
+      // Matrix A x Matrix C -> Result C
+      // 1. Highlight Row i in Matrix A
+      for (let colIdx = 0; colIdx < state.colsA; colIdx++) {
+        const cellA = document.getElementById(`cell-A-${i}-${colIdx}`);
+        if (cellA) cellA.classList.add('row-active');
+      }
+
+      // 2. Highlight Column j in Matrix C Input
+      for (let rowIdx = 0; rowIdx < state.rowsC; rowIdx++) {
+        const cellCIn = document.getElementById(`cell-CIn-${rowIdx}-${j}`);
+        if (cellCIn) cellCIn.classList.add('col-active');
+      }
+
+      // 3. Highlight exact multiplying pair A[i][k] and C[k][j]
+      const termCellA = document.getElementById(`cell-A-${i}-${k}`);
+      const termCellCIn = document.getElementById(`cell-CIn-${k}-${j}`);
+      if (termCellA) termCellA.classList.add('term-active');
+      if (termCellCIn) termCellCIn.classList.add('term-active');
+
+      // 4. Highlight target cell
+      const targetCellC = document.getElementById(`cell-C-${i}-${j}`);
+      if (targetCellC) {
+        targetCellC.classList.add('target-active', 'target-computed');
+        const valElem = document.getElementById(`val-C-${i}-${j}`);
+        if (valElem) valElem.textContent = runningSum;
+        updateCellZeroState(targetCellC, runningSum);
+      }
+      el.currentCellName.textContent = `(A×C)[${i + 1}, ${j + 1}]`;
+      el.ruleRow.textContent = `Row ${i + 1} (A)`;
+      el.ruleCol.textContent = `Col ${j + 1} (C)`;
+    } else if (stepOp === 'AB') {
       // Stage 1 (A x B)
       // 1. Highlight Row i in Matrix A
       for (let colIdx = 0; colIdx < state.colsA; colIdx++) {
@@ -1025,19 +1437,32 @@
       if (termCellB) termCellB.classList.add('term-active');
 
       // 4. Highlight target cell
-      if (state.matrixCount === 2) {
-        const targetCellC = document.getElementById(`cell-C-${i}-${j}`);
-        if (targetCellC) {
-          targetCellC.classList.add('target-active', 'target-computed');
-          const valElem = document.getElementById(`val-C-${i}-${j}`);
-          if (valElem) valElem.textContent = runningSum;
-          updateCellZeroState(targetCellC, runningSum);
+      const targetCellC = document.getElementById(`cell-C-${i}-${j}`);
+      if (targetCellC) {
+        targetCellC.classList.add('target-active', 'target-computed');
+        const valElem = document.getElementById(`val-C-${i}-${j}`);
+        if (valElem) valElem.textContent = runningSum;
+        updateCellZeroState(targetCellC, runningSum);
+      }
+      el.currentCellName.textContent = state.matrixCount === 2 ? `C[${i + 1}, ${j + 1}]` : `(A×B)[${i + 1}, ${j + 1}]`;
+      el.ruleRow.textContent = `${i + 1}`;
+      el.ruleCol.textContent = `${j + 1}`;
+    } else {
+      // 3-matrix ABC mode
+      if (stage === 1) {
+        for (let colIdx = 0; colIdx < state.colsA; colIdx++) {
+          const cellA = document.getElementById(`cell-A-${i}-${colIdx}`);
+          if (cellA) cellA.classList.add('row-active');
         }
-        el.currentCellName.textContent = `C[${i + 1}, ${j + 1}]`;
-        el.ruleRow.textContent = `${i + 1}`;
-        el.ruleCol.textContent = `${j + 1}`;
-      } else {
-        // In 3-matrix mode Stage 1 targets Intermediate (A x B)
+        for (let rowIdx = 0; rowIdx < state.rowsB; rowIdx++) {
+          const cellB = document.getElementById(`cell-B-${rowIdx}-${j}`);
+          if (cellB) cellB.classList.add('col-active');
+        }
+        const termCellA = document.getElementById(`cell-A-${i}-${k}`);
+        const termCellB = document.getElementById(`cell-B-${k}-${j}`);
+        if (termCellA) termCellA.classList.add('term-active');
+        if (termCellB) termCellB.classList.add('term-active');
+
         const targetInter = document.getElementById(`cell-Inter-${i}-${j}`);
         if (targetInter) {
           targetInter.classList.add('target-active', 'target-computed');
@@ -1048,38 +1473,32 @@
         el.currentCellName.textContent = `(A×B)[${i + 1}, ${j + 1}] (Stage 1)`;
         el.ruleRow.textContent = `Row ${i + 1} (A)`;
         el.ruleCol.textContent = `Col ${j + 1} (B)`;
-      }
-    } else {
-      // Stage 2 (Intermediate AB x C -> Result R)
-      // 1. Highlight Row i in Intermediate Product
-      for (let colIdx = 0; colIdx < state.colsB; colIdx++) {
-        const cellInter = document.getElementById(`cell-Inter-${i}-${colIdx}`);
-        if (cellInter) cellInter.classList.add('row-active');
-      }
+      } else {
+        // Stage 2 (Intermediate AB x C -> Result R)
+        for (let colIdx = 0; colIdx < state.colsB; colIdx++) {
+          const cellInter = document.getElementById(`cell-Inter-${i}-${colIdx}`);
+          if (cellInter) cellInter.classList.add('row-active');
+        }
+        for (let rowIdx = 0; rowIdx < state.rowsC; rowIdx++) {
+          const cellCIn = document.getElementById(`cell-CIn-${rowIdx}-${j}`);
+          if (cellCIn) cellCIn.classList.add('col-active');
+        }
+        const termCellInter = document.getElementById(`cell-Inter-${i}-${k}`);
+        const termCellCIn = document.getElementById(`cell-CIn-${k}-${j}`);
+        if (termCellInter) termCellInter.classList.add('term-active');
+        if (termCellCIn) termCellCIn.classList.add('term-active');
 
-      // 2. Highlight Column j in Matrix C Input
-      for (let rowIdx = 0; rowIdx < state.rowsC; rowIdx++) {
-        const cellCIn = document.getElementById(`cell-CIn-${rowIdx}-${j}`);
-        if (cellCIn) cellCIn.classList.add('col-active');
+        const targetCellC = document.getElementById(`cell-C-${i}-${j}`);
+        if (targetCellC) {
+          targetCellC.classList.add('target-active', 'target-computed');
+          const valElem = document.getElementById(`val-C-${i}-${j}`);
+          if (valElem) valElem.textContent = runningSum;
+          updateCellZeroState(targetCellC, runningSum);
+        }
+        el.currentCellName.textContent = `Result R[${i + 1}, ${j + 1}] (Stage 2)`;
+        el.ruleRow.textContent = `Row ${i + 1} (A×B)`;
+        el.ruleCol.textContent = `Col ${j + 1} (C)`;
       }
-
-      // 3. Highlight exact multiplying pair AB[i][k] and C[k][j]
-      const termCellInter = document.getElementById(`cell-Inter-${i}-${k}`);
-      const termCellCIn = document.getElementById(`cell-CIn-${k}-${j}`);
-      if (termCellInter) termCellInter.classList.add('term-active');
-      if (termCellCIn) termCellCIn.classList.add('term-active');
-
-      // 4. Highlight target cell in Final Result
-      const targetCellC = document.getElementById(`cell-C-${i}-${j}`);
-      if (targetCellC) {
-        targetCellC.classList.add('target-active', 'target-computed');
-        const valElem = document.getElementById(`val-C-${i}-${j}`);
-        if (valElem) valElem.textContent = runningSum;
-        updateCellZeroState(targetCellC, runningSum);
-      }
-      el.currentCellName.textContent = `Result R[${i + 1}, ${j + 1}] (Stage 2)`;
-      el.ruleRow.textContent = `Row ${i + 1} (A×B)`;
-      el.ruleCol.textContent = `Col ${j + 1} (C)`;
     }
 
     // Render terms breakdown chips
@@ -1090,12 +1509,23 @@
       
       let aVal = 0;
       let bVal = 0;
-      if (state.matrixCount === 2 || stage === 1) {
+      if (stepOp === 'BC') {
+        aVal = state.matrixB[i]?.[t] ?? 0;
+        bVal = state.matrixCInput[t]?.[j] ?? 0;
+      } else if (stepOp === 'AC') {
+        aVal = state.matrixA[i]?.[t] ?? 0;
+        bVal = state.matrixCInput[t]?.[j] ?? 0;
+      } else if (stepOp === 'AB') {
         aVal = state.matrixA[i]?.[t] ?? 0;
         bVal = state.matrixB[t]?.[j] ?? 0;
       } else {
-        aVal = state.intermediateAB[i]?.[t] ?? 0;
-        bVal = state.matrixCInput[t]?.[j] ?? 0;
+        if (stage === 1) {
+          aVal = state.matrixA[i]?.[t] ?? 0;
+          bVal = state.matrixB[t]?.[j] ?? 0;
+        } else {
+          aVal = state.intermediateAB[i]?.[t] ?? 0;
+          bVal = state.matrixCInput[t]?.[j] ?? 0;
+        }
       }
       const pVal = aVal * bVal;
 
@@ -1135,7 +1565,7 @@
     el.runningTotalValue.textContent = runningSum;
 
     // Narrative text
-    const stagePrefix = state.matrixCount === 3 ? `[Stage ${stage} of 2] ` : '';
+    const stagePrefix = stepOp === 'ABC' ? `[Stage ${stage} of 2] ` : '';
     if (isCellEnd) {
       el.narrativeExplanation.innerHTML = `${stagePrefix}Completed cell <strong>${targetLabel}</strong>! Sum is <strong>${runningSum}</strong>.`;
     } else {
@@ -1255,10 +1685,15 @@
   function jumpToCell(r, c) {
     if (!canMultiply() || state.steps.length === 0) return;
     stopPlaying();
-    // Find the end step of cell C[r, c]
-    const stepTarget = state.steps.findIndex(s => s.i === r && s.j === c && s.isCellEnd);
+    const op = getEffectiveOperation();
+    const targetStage = op === 'ABC' ? 2 : 1;
+    // Find the end step of target cell in the final stage
+    const stepTarget = state.steps.findIndex(s => s.stage === targetStage && s.i === r && s.j === c && s.isCellEnd);
     if (stepTarget !== -1) {
       setStepIndex(stepTarget);
+    } else {
+      const fallback = state.steps.findIndex(s => s.stage === targetStage && s.i === r && s.j === c);
+      if (fallback !== -1) setStepIndex(fallback);
     }
   }
 
@@ -1274,10 +1709,18 @@
   function startPlaying() {
     if (!canMultiply()) return;
 
-    // Auto-fill blanks with 0 if any exist
-    const hasEmpty = state.matrixA.some(row => row.some(v => v === '' || v === null || (typeof v === 'number' && isNaN(v)))) ||
-                     state.matrixB.some(row => row.some(v => v === '' || v === null || (typeof v === 'number' && isNaN(v)))) ||
-                     (state.matrixCount === 3 && state.matrixCInput.some(row => row.some(v => v === '' || v === null || (typeof v === 'number' && isNaN(v)))));
+    // Auto-fill blanks with 0 only if any exist in the ACTIVE matrices
+    const op = getEffectiveOperation();
+    let hasEmpty = false;
+    if (op === 'AB' || op === 'ABC' || op === 'AC') {
+      if (state.matrixA.some(row => row.some(v => v === '' || v === null || (typeof v === 'number' && isNaN(v))))) hasEmpty = true;
+    }
+    if (op === 'AB' || op === 'ABC' || op === 'BC') {
+      if (state.matrixB.some(row => row.some(v => v === '' || v === null || (typeof v === 'number' && isNaN(v))))) hasEmpty = true;
+    }
+    if (state.matrixCount === 3 && (op === 'BC' || op === 'ABC' || op === 'AC')) {
+      if (state.matrixCInput.some(row => row.some(v => v === '' || v === null || (typeof v === 'number' && isNaN(v))))) hasEmpty = true;
+    }
     if (hasEmpty) {
       calculateAndFillZeros();
     }
@@ -1484,6 +1927,134 @@
     el.narrativeExplanation.innerHTML = `Swapped Matrix A and Matrix B (<strong>A ⇄ B</strong>). Dimensions and cell values exchanged.`;
   }
 
+  // --- Swap Matrix B and Matrix C ---
+  function swapMatrixBandC() {
+    stopPlaying();
+    if (state.matrixCount === 2) {
+      setMatrixCount(3);
+    }
+
+    const tempRows = state.rowsB;
+    const tempCols = state.colsB;
+    const tempMat = state.matrixB;
+
+    state.rowsB = state.rowsC;
+    state.colsB = state.colsC;
+    state.matrixB = state.matrixCInput;
+
+    state.rowsC = tempRows;
+    state.colsC = tempCols;
+    state.matrixCInput = tempMat;
+
+    if (state.isLinked) {
+      const op = getEffectiveOperation();
+      if (op === 'BC') {
+        state.rowsC = state.colsB;
+        state.matrixCInput = resizeMatrixPreserving(state.matrixCInput, state.rowsC, state.colsC);
+      } else {
+        state.rowsB = state.colsA;
+        state.matrixB = resizeMatrixPreserving(state.matrixB, state.rowsB, state.colsB);
+        state.rowsC = state.colsB;
+        state.matrixCInput = resizeMatrixPreserving(state.matrixCInput, state.rowsC, state.colsC);
+      }
+    }
+
+    if (el.cardMatrixB) {
+      el.cardMatrixB.classList.remove('animate-swap');
+      void el.cardMatrixB.offsetWidth;
+      el.cardMatrixB.classList.add('animate-swap');
+    }
+    if (el.cardMatrixCInput) {
+      el.cardMatrixCInput.classList.remove('animate-swap');
+      void el.cardMatrixCInput.offsetWidth;
+      el.cardMatrixCInput.classList.add('animate-swap');
+    }
+    setTimeout(() => {
+      el.cardMatrixB?.classList.remove('animate-swap');
+      el.cardMatrixCInput?.classList.remove('animate-swap');
+    }, 500);
+
+    computeResultMatrix();
+    generateSteps();
+    renderAll();
+    setStepIndex(-1);
+
+    sfx.playStepSound(0, 1);
+    el.narrativeExplanation.innerHTML = `Swapped Matrix B and Matrix C (<strong>B ⇄ C</strong>). Dimensions and cell values exchanged.`;
+  }
+
+  // --- Swap Matrix A and Matrix C ---
+  function swapMatrixAandC() {
+    stopPlaying();
+    if (state.matrixCount === 2) {
+      setMatrixCount(3);
+    }
+
+    const tempRows = state.rowsA;
+    const tempCols = state.colsA;
+    const tempMat = state.matrixA;
+
+    state.rowsA = state.rowsC;
+    state.colsA = state.colsC;
+    state.matrixA = state.matrixCInput;
+
+    state.rowsC = tempRows;
+    state.colsC = tempCols;
+    state.matrixCInput = tempMat;
+
+    if (state.isLinked) {
+      state.rowsB = state.colsA;
+      state.matrixB = resizeMatrixPreserving(state.matrixB, state.rowsB, state.colsB);
+      state.rowsC = state.colsB;
+      state.matrixCInput = resizeMatrixPreserving(state.matrixCInput, state.rowsC, state.colsC);
+    }
+
+    if (el.cardMatrixA) {
+      el.cardMatrixA.classList.remove('animate-swap');
+      void el.cardMatrixA.offsetWidth;
+      el.cardMatrixA.classList.add('animate-swap');
+    }
+    if (el.cardMatrixCInput) {
+      el.cardMatrixCInput.classList.remove('animate-swap');
+      void el.cardMatrixCInput.offsetWidth;
+      el.cardMatrixCInput.classList.add('animate-swap');
+    }
+    setTimeout(() => {
+      el.cardMatrixA?.classList.remove('animate-swap');
+      el.cardMatrixCInput?.classList.remove('animate-swap');
+    }, 500);
+
+    computeResultMatrix();
+    generateSteps();
+    renderAll();
+    setStepIndex(-1);
+
+    sfx.playStepSound(0, 1);
+    el.narrativeExplanation.innerHTML = `Swapped Matrix A and Matrix C (<strong>A ⇄ C</strong>). Dimensions and cell values exchanged.`;
+  }
+
+  // --- Operation Mode Selector (Auto, AB, BC, AC, ABC) ---
+  function setOperationMode(mode) {
+    stopPlaying();
+    state.opMode = mode;
+    if (state.matrixCount === 2 && (mode === 'BC' || mode === 'AC' || mode === 'ABC')) {
+      setMatrixCount(3);
+    }
+    computeResultMatrix();
+    generateSteps();
+    renderAll();
+    setStepIndex(-1);
+
+    const labels = {
+      auto: 'Auto-detection (multiplies only matrices with values filled in)',
+      AB: 'Matrix A × Matrix B',
+      BC: 'Matrix B × Matrix C',
+      AC: 'Matrix A × Matrix C',
+      ABC: '3 Matrices: (A × B) × C'
+    };
+    el.narrativeExplanation.innerHTML = `Multiplication mode: <strong>${labels[mode] || mode}</strong>.`;
+  }
+
   // --- Dimension Presets ---
   const PRESETS = {
     '2x2': { rowsA: 2, colsA: 2, rowsB: 2, colsB: 2 },
@@ -1586,47 +2157,52 @@
   function calculateAndFillZeros() {
     stopPlaying();
     let filledCount = 0;
+    const op = getEffectiveOperation();
 
-    // 1. Fill empty boxes in Matrix A with 0
-    for (let r = 0; r < state.rowsA; r++) {
-      for (let c = 0; c < state.colsA; c++) {
-        const val = state.matrixA[r]?.[c];
-        if (val === '' || val === null || val === undefined || (typeof val === 'number' && isNaN(val))) {
-          state.matrixA[r][c] = 0;
-          filledCount++;
-          const cellA = document.getElementById(`cell-A-${r}-${c}`);
-          if (cellA) {
-            const input = cellA.querySelector('input');
-            if (input) input.value = 0;
-            updateCellZeroState(cellA, 0);
-            cellA.classList.add('fill-flash');
-            setTimeout(() => cellA.classList.remove('fill-flash'), 450);
+    // 1. Fill empty boxes in Matrix A with 0 ONLY if active in operation
+    if (op === 'AB' || op === 'ABC' || op === 'AC') {
+      for (let r = 0; r < state.rowsA; r++) {
+        for (let c = 0; c < state.colsA; c++) {
+          const val = state.matrixA[r]?.[c];
+          if (val === '' || val === null || val === undefined || (typeof val === 'number' && isNaN(val))) {
+            state.matrixA[r][c] = 0;
+            filledCount++;
+            const cellA = document.getElementById(`cell-A-${r}-${c}`);
+            if (cellA) {
+              const input = cellA.querySelector('input');
+              if (input) input.value = 0;
+              updateCellZeroState(cellA, 0);
+              cellA.classList.add('fill-flash');
+              setTimeout(() => cellA.classList.remove('fill-flash'), 450);
+            }
           }
         }
       }
     }
 
-    // 2. Fill empty boxes in Matrix B with 0
-    for (let r = 0; r < state.rowsB; r++) {
-      for (let c = 0; c < state.colsB; c++) {
-        const val = state.matrixB[r]?.[c];
-        if (val === '' || val === null || val === undefined || (typeof val === 'number' && isNaN(val))) {
-          state.matrixB[r][c] = 0;
-          filledCount++;
-          const cellB = document.getElementById(`cell-B-${r}-${c}`);
-          if (cellB) {
-            const input = cellB.querySelector('input');
-            if (input) input.value = 0;
-            updateCellZeroState(cellB, 0);
-            cellB.classList.add('fill-flash');
-            setTimeout(() => cellB.classList.remove('fill-flash'), 450);
+    // 2. Fill empty boxes in Matrix B with 0 ONLY if active in operation
+    if (op === 'AB' || op === 'ABC' || op === 'BC') {
+      for (let r = 0; r < state.rowsB; r++) {
+        for (let c = 0; c < state.colsB; c++) {
+          const val = state.matrixB[r]?.[c];
+          if (val === '' || val === null || val === undefined || (typeof val === 'number' && isNaN(val))) {
+            state.matrixB[r][c] = 0;
+            filledCount++;
+            const cellB = document.getElementById(`cell-B-${r}-${c}`);
+            if (cellB) {
+              const input = cellB.querySelector('input');
+              if (input) input.value = 0;
+              updateCellZeroState(cellB, 0);
+              cellB.classList.add('fill-flash');
+              setTimeout(() => cellB.classList.remove('fill-flash'), 450);
+            }
           }
         }
       }
     }
 
-    // 3. Fill empty boxes in Matrix C (Input) with 0 if 3-matrix mode
-    if (state.matrixCount === 3) {
+    // 3. Fill empty boxes in Matrix C (Input) with 0 ONLY if active in operation
+    if (state.matrixCount === 3 && (op === 'BC' || op === 'ABC' || op === 'AC')) {
       for (let r = 0; r < state.rowsC; r++) {
         for (let c = 0; c < state.colsC; c++) {
           const val = state.matrixCInput[r]?.[c];
@@ -1649,42 +2225,22 @@
     // 4. Compute Result Matrix and generate steps
     computeResultMatrix();
     generateSteps();
-
-    // 5. Update Intermediate display if 3-matrix mode
-    if (state.matrixCount === 3) {
-      for (let r = 0; r < state.rowsA; r++) {
-        for (let c = 0; c < state.colsB; c++) {
-          const valElem = document.getElementById(`val-Inter-${r}-${c}`);
-          const cellInter = document.getElementById(`cell-Inter-${r}-${c}`);
-          const val = state.intermediateAB[r]?.[c] ?? 0;
-          if (valElem) valElem.textContent = val;
-          if (cellInter) updateCellZeroState(cellInter, val);
-        }
-      }
-    }
-
-    // 6. Update Final Result display
-    const outRows = state.rowsA;
-    const outCols = state.matrixCount === 2 ? state.colsB : state.colsC;
-    for (let r = 0; r < outRows; r++) {
-      for (let c = 0; c < outCols; c++) {
-        const valElem = document.getElementById(`val-C-${r}-${c}`);
-        const cellC = document.getElementById(`cell-C-${r}-${c}`);
-        const val = state.matrixC[r]?.[c] ?? 0;
-        if (valElem) valElem.textContent = val;
-        if (cellC) updateCellZeroState(cellC, val);
-      }
-    }
-
+    renderAll();
     setStepIndex(-1);
 
     // Audio cue
     sfx.playStepSound(0, 1);
 
     // Narrative feedback
-    const resName = state.matrixCount === 2 ? 'Result Matrix C' : 'Final Result R';
+    const opLabels = {
+      'AB': 'Result (A × B)',
+      'BC': 'Result (B × C)',
+      'AC': 'Result (A × C)',
+      'ABC': 'Final Result R ((A × B) × C)'
+    };
+    const resName = opLabels[op] || 'Result';
     if (filledCount > 0) {
-      el.narrativeExplanation.innerHTML = `Filled <strong>${filledCount} empty box${filledCount > 1 ? 'es' : ''}</strong> with <strong>0</strong> and calculated ${resName}.`;
+      el.narrativeExplanation.innerHTML = `Filled <strong>${filledCount} empty box${filledCount > 1 ? 'es' : ''}</strong> with <strong>0</strong> in active matrices and calculated ${resName}.`;
     } else {
       el.narrativeExplanation.innerHTML = `Calculated ${resName} successfully. Ready for step-by-step playback or inspection.`;
     }
@@ -1709,8 +2265,8 @@
     }
 
     const C = state.matrixC;
-    const m = state.rowsA;
-    const n = state.colsB;
+    const m = state.matrixC.length;
+    const n = state.matrixC[0]?.length || 0;
 
     switch (format) {
       case 'latex': {
@@ -1885,7 +2441,19 @@
     });
 
     el.fixDimensionBtn.addEventListener('click', () => {
-      updateDimensions(state.rowsA, state.colsA, state.colsA, state.colsB);
+      const op = getEffectiveOperation();
+      if (op === 'BC') {
+        updateDimensionsC(state.colsB, state.colsC);
+      } else if (op === 'AC') {
+        updateDimensionsC(state.colsA, state.colsC);
+      } else if (op === 'AB') {
+        updateDimensions(state.rowsA, state.colsA, state.colsA, state.colsB);
+      } else {
+        updateDimensions(state.rowsA, state.colsA, state.colsA, state.colsB);
+        if (state.matrixCount === 3) {
+          updateDimensionsC(state.colsB, state.colsC);
+        }
+      }
     });
 
     // Player controls
@@ -2001,6 +2569,16 @@
     // Matrix Swap buttons (Top Toolbar & Stage Operator)
     el.swapABTopBtn?.addEventListener('click', swapMatrixAandB);
     el.swapStageBtn?.addEventListener('click', swapMatrixAandB);
+    el.swapBCTopBtn?.addEventListener('click', swapMatrixBandC);
+    el.swapACTopBtn?.addEventListener('click', swapMatrixAandC);
+    el.swapStageBtnBC?.addEventListener('click', swapMatrixBandC);
+
+    // Operation Mode pills
+    el.opModeAutoBtn?.addEventListener('click', () => setOperationMode('auto'));
+    el.opModeABBtn?.addEventListener('click', () => setOperationMode('AB'));
+    el.opModeBCBtn?.addEventListener('click', () => setOperationMode('BC'));
+    el.opModeACBtn?.addEventListener('click', () => setOperationMode('AC'));
+    el.opModeABCBtn?.addEventListener('click', () => setOperationMode('ABC'));
 
     // Matrix C dimension inputs & steppers
     el.rowsC?.addEventListener('change', () => updateDimensionsC(el.rowsC.value, state.colsC));

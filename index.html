@@ -256,13 +256,27 @@
           </div>
         </div>
 
-        <!-- Swap A and B button -->
-        <button id="swapABTopBtn" class="btn btn-sm btn-subtle" title="Swap values and dimensions of Matrix A and Matrix B">
-          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M7 16V4m0 0L3 8m4-4l4 4m10 4v12m0 0l4-4m-4 4l-4-4"/>
-          </svg>
-          <span>Swap A ⇄ B</span>
-        </button>
+        <!-- Swap Matrix Buttons (A⇄B, B⇄C, A⇄C) -->
+        <div class="swap-actions-cluster" title="Swap matrix dimensions and cell values">
+          <button id="swapABTopBtn" class="btn btn-sm btn-subtle" title="Swap values and dimensions of Matrix A and Matrix B">
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M7 16V4m0 0L3 8m4-4l4 4m10 4v12m0 0l4-4m-4 4l-4-4"/>
+            </svg>
+            <span>A ⇄ B</span>
+          </button>
+          <button id="swapBCTopBtn" class="btn btn-sm btn-subtle" title="Swap values and dimensions of Matrix B and Matrix C">
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M7 16V4m0 0L3 8m4-4l4 4m10 4v12m0 0l4-4m-4 4l-4-4"/>
+            </svg>
+            <span>B ⇄ C</span>
+          </button>
+          <button id="swapACTopBtn" class="btn btn-sm btn-subtle" title="Swap values and dimensions of Matrix A and Matrix C">
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M7 16V4m0 0L3 8m4-4l4 4m10 4v12m0 0l4-4m-4 4l-4-4"/>
+            </svg>
+            <span>A ⇄ C</span>
+          </button>
+        </div>
 
         <!-- Keep matrices empty button -->
         <button id="emptyAllBtn" class="btn btn-sm btn-subtle" title="Make all cells blank/empty">
@@ -323,6 +337,27 @@
       <button id="fixDimensionBtn" class="btn btn-sm btn-primary">Fix Dimension Mismatch</button>
     </div>
 
+    <!-- Operation Mode & Auto-Detect Banner -->
+    <div class="operation-mode-bar card-glass" id="opModeBar">
+      <div class="op-mode-left">
+        <div class="op-badge-indicator">
+          <span class="op-icon-sparkle">⚡</span>
+          <span class="op-badge-label">Active Multiplication:</span>
+          <span class="op-badge-active" id="activeOpCurrentBadge">A &times; B</span>
+          <span class="op-badge-reason" id="activeOpReasonBadge">Auto-detected from filled matrices</span>
+        </div>
+      </div>
+      <div class="op-mode-pills" id="opModeGroup">
+        <button class="op-pill active" id="opModeAutoBtn" title="Automatically calculate only between matrices with values filled in (e.g. A × B, B × C, or A × C)">
+          ⚡ Auto-Detect
+        </button>
+        <button class="op-pill" id="opModeABBtn" title="Calculate Matrix A × Matrix B">A &times; B</button>
+        <button class="op-pill" id="opModeBCBtn" title="Calculate Matrix B × Matrix C">B &times; C</button>
+        <button class="op-pill" id="opModeACBtn" title="Calculate Matrix A × Matrix C">A &times; C</button>
+        <button class="op-pill" id="opModeABCBtn" title="Calculate 3 Matrices: (A × B) × C">(A &times; B) &times; C</button>
+      </div>
+    </div>
+
     <!-- Main Workspace Stage -->
     <main class="matrix-stage">
       <!-- Matrix A Section -->
@@ -332,6 +367,7 @@
             <span class="color-dot dot-a"></span>
             <h3>Matrix A</h3>
             <span class="badge badge-a" id="badgeA">2 &times; 3</span>
+            <span class="badge-card-status hidden" id="statusBadgeA">Skipped</span>
           </div>
           <div class="matrix-actions-inline">
             <button class="btn-micro" id="emptyABtn" title="Make Matrix A cells empty">⬜ Empty</button>
@@ -350,9 +386,9 @@
       </div>
 
       <!-- Operator Sign between A and B with interactive Swap -->
-      <div class="math-operator operator-with-swap">
+      <div class="math-operator operator-with-swap" id="opTimesAB">
         <span class="operator-circle">&times;</span>
-        <button id="swapStageBtn" class="btn-swap-pill" title="Swap values & dimensions of Matrix A and Matrix B">⇄ Swap</button>
+        <button id="swapStageBtn" class="btn-swap-pill" title="Swap values & dimensions of Matrix A and Matrix B">⇄ A ⇄ B</button>
       </div>
 
       <!-- Matrix B Section -->
@@ -362,6 +398,7 @@
             <span class="color-dot dot-b"></span>
             <h3>Matrix B</h3>
             <span class="badge badge-b" id="badgeB">3 &times; 2</span>
+            <span class="badge-card-status hidden" id="statusBadgeB">Skipped</span>
           </div>
           <div class="matrix-actions-inline">
             <button class="btn-micro" id="emptyBBtn" title="Make Matrix B cells empty">⬜ Empty</button>
@@ -379,9 +416,10 @@
         </div>
       </div>
 
-      <!-- In 3-Matrix mode: Operator times between B and C -->
-      <div class="math-operator hidden" id="opTimesBC">
+      <!-- In 3-Matrix mode: Operator times between B and C with interactive Swap -->
+      <div class="math-operator operator-with-swap hidden" id="opTimesBC">
         <span class="operator-circle">&times;</span>
+        <button id="swapStageBtnBC" class="btn-swap-pill" title="Swap values & dimensions of Matrix B and Matrix C">⇄ B ⇄ C</button>
       </div>
 
       <!-- In 3-Matrix mode: Matrix C Section (Input) -->
@@ -391,6 +429,7 @@
             <span class="color-dot dot-c-input"></span>
             <h3>Matrix C</h3>
             <span class="badge badge-c-input" id="badgeCInput">2 &times; 2</span>
+            <span class="badge-card-status hidden" id="statusBadgeC">Skipped</span>
           </div>
           <div class="matrix-actions-inline">
             <button class="btn-micro" id="emptyCBtn" title="Make Matrix C cells empty">⬜ Empty</button>
